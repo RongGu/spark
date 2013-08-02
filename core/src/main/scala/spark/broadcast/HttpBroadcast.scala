@@ -21,24 +21,38 @@ extends Broadcast[T](id) with Logging with Serializable {
   def blockId: String = "broadcast_" + id
 
   HttpBroadcast.synchronized {
-    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, false)
+    //Let BlockManagerMaster know that we have the broadcast block for its latter notification us to remove.
+    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, true)
   }
 
   if (!isLocal) { 
     HttpBroadcast.write(id, value_)
+  }
+  
+  override def rm(toClearSource: Boolean = false) {
+    logInfo("Remove broadcast variable " + blockId)
+    SparkEnv.get.blockManager.master.removeBlock(blockId)
+    SparkEnv.get.blockManager.removeBlock(blockId, false)
+    if(toClearSource){
+      val path: String = HttpBroadcast.broadcastDir + "/" + "broadcast-" + id
+      HttpBroadcast.files.internalMap.remove(path)
+      new File(path).delete()
+      logInfo("Deleted source broadcast file '" + path + "'")
+    }
   }
 
   // Called by JVM when deserializing an object
   private def readObject(in: ObjectInputStream) {
     in.defaultReadObject()
     HttpBroadcast.synchronized {
-      SparkEnv.get.blockManager.getSingle(blockId) match {
+      SparkEnv.get.blockManager.getSingleLocal(blockId) match {
         case Some(x) => value_ = x.asInstanceOf[T]
         case None => {
           logInfo("Started reading broadcast variable " + id)
           val start = System.nanoTime
           value_ = HttpBroadcast.read[T](id)
-          SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, false)
+          //Let BlockManagerMaster know that we have the broadcast block for its latter notification us to remove. 
+          SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, true) 
           val time = (System.nanoTime - start) / 1e9
           logInfo("Reading broadcast variable " + id + " took " + time + " s")
         }

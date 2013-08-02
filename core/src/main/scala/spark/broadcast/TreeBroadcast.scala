@@ -18,7 +18,8 @@ extends Broadcast[T](id) with Logging with Serializable {
   def blockId = "broadcast_" + id
 
   MultiTracker.synchronized {
-    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, false)
+    //Let BlockManagerMaster know that we have the broadcast block for its latter notification us to remove.
+    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, true)
   }
 
   @transient var arrayOfBlocks: Array[BroadcastBlock] = null
@@ -45,6 +46,21 @@ extends Broadcast[T](id) with Logging with Serializable {
   // Must call this after all the variables have been created/initialized
   if (!isLocal) {
     sendBroadcast()
+  }
+  
+  override def rm(toClearSource: Boolean = false) {
+    logInfo("Remove broadcast variable " + blockId)
+    SparkEnv.get.blockManager.master.removeBlock(blockId)
+    SparkEnv.get.blockManager.removeBlock(blockId, false)
+    if(toClearSource)
+      clearBlockSource()
+  }
+  
+  def clearBlockSource(){
+    arrayOfBlocks = null
+    listOfSources = null
+    serveMR = null
+    guideMR = null
   }
 
   def sendBroadcast() {
@@ -92,7 +108,7 @@ extends Broadcast[T](id) with Logging with Serializable {
   private def readObject(in: ObjectInputStream) {
     in.defaultReadObject()
     MultiTracker.synchronized {
-      SparkEnv.get.blockManager.getSingle(blockId) match {
+      SparkEnv.get.blockManager.getSingleLocal(blockId) match {
         case Some(x) =>
           value_ = x.asInstanceOf[T]
 

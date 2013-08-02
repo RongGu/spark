@@ -772,6 +772,13 @@ private[spark] class BlockManager(
   def getSingle(blockId: String): Option[Any] = {
     get(blockId).map(_.next())
   }
+  
+  /**
+   * Read a block consisting of a single object only from local BlockManager.
+   */
+  def getSingleLocal(blockId: String): Option[Any] = {
+    getLocal(blockId).map(_.next())
+  }
 
   /**
    * Write a block consisting of a single object.

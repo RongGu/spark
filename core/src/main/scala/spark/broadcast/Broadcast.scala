@@ -12,6 +12,10 @@ abstract class Broadcast[T](private[spark] val id: Long) extends Serializable {
   // readObject having to be 'private' in sub-classes.
 
   override def toString = "spark.Broadcast(" + id + ")"
+  
+  // Remove a Broadcast blcok from the SparkContext and Executors that have it.
+  // Set isClearSource true to also remove the Broadcast value from its source.
+  def rm(toClearSource: Boolean)
 }
 
 private[spark] 

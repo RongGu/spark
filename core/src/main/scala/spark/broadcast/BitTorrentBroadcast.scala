@@ -21,7 +21,8 @@ private[spark] class BitTorrentBroadcast[T](@transient var value_ : T, isLocal: 
   def blockId: String = "broadcast_" + id
 
   MultiTracker.synchronized {
-    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, false)
+    //Let BlockManagerMaster know that we have the broadcast block for its latter notification us to remove.
+    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, true)
   }
 
   @transient var arrayOfBlocks: Array[BroadcastBlock] = null
@@ -57,6 +58,23 @@ private[spark] class BitTorrentBroadcast[T](@transient var value_ : T, isLocal: 
   // Must call this after all the variables have been created/initialized
   if (!isLocal) {
     sendBroadcast()
+  }
+  
+  override def rm(toClearSource: Boolean = false) {
+    logInfo("Remove broadcast variable " + blockId)
+    SparkEnv.get.blockManager.master.removeBlock(blockId)
+    SparkEnv.get.blockManager.removeBlock(blockId, false)
+    if(toClearSource)
+      clearBlockSource()
+  }
+  
+  def clearBlockSource(){
+    arrayOfBlocks = null
+    hasBlocksBitVector = null
+    numCopiesSent = null
+    listOfSources = null
+    serveMR = null
+    guideMR = null
   }
 
   def sendBroadcast() {
@@ -116,7 +134,7 @@ private[spark] class BitTorrentBroadcast[T](@transient var value_ : T, isLocal: 
   private def readObject(in: ObjectInputStream) {
     in.defaultReadObject()
     MultiTracker.synchronized {
-      SparkEnv.get.blockManager.getSingle(blockId) match {
+      SparkEnv.get.blockManager.getSingleLocal(blockId) match {
         case Some(x) =>
           value_ = x.asInstanceOf[T]
 
@@ -139,8 +157,9 @@ private[spark] class BitTorrentBroadcast[T](@transient var value_ : T, isLocal: 
           val receptionSucceeded = receiveBroadcast(id)
           if (receptionSucceeded) {
             value_ = MultiTracker.unBlockifyObject[T](arrayOfBlocks, totalBytes, totalBlocks)
+            //Let BlockManagerMaster know that we have the broadcast block for its latter notification us to remove.
             SparkEnv.get.blockManager.putSingle(
-              blockId, value_, StorageLevel.MEMORY_AND_DISK, false)
+              blockId, value_, StorageLevel.MEMORY_AND_DISK, true)
           }  else {
             logError("Reading broadcast variable " + id + " failed")
           }
