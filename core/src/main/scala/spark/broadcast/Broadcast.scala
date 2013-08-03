@@ -15,7 +15,7 @@ abstract class Broadcast[T](private[spark] val id: Long) extends Serializable {
   
   // Remove a Broadcast blcok from the SparkContext and Executors that have it.
   // Set isClearSource true to also remove the Broadcast value from its source.
-  def rm(toClearSource: Boolean)
+  def remove(toReleaseSource: Boolean)
 }
 
 private[spark] 
@@ -49,9 +49,9 @@ class BroadcastManager(val _isDriver: Boolean) extends Logging with Serializable
   }
 
   private val nextBroadcastId = new AtomicLong(0)
-
-  def newBroadcast[T](value_ : T, isLocal: Boolean) =
-    broadcastFactory.newBroadcast[T](value_, isLocal, nextBroadcastId.getAndIncrement())
-
+  
+  def newBroadcast[T](value_ : T, isLocal: Boolean, tellMaster: Boolean) =
+    broadcastFactory.newBroadcast[T](value_, isLocal, nextBroadcastId.getAndIncrement(), tellMaster)
+  
   def isDriver = _isDriver
 }

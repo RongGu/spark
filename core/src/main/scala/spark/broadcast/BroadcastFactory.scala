@@ -8,6 +8,6 @@ package spark.broadcast
  */
 private[spark] trait BroadcastFactory {
   def initialize(isDriver: Boolean): Unit
-  def newBroadcast[T](value: T, isLocal: Boolean, id: Long): Broadcast[T]
+  def newBroadcast[T](value: T, isLocal: Boolean, id: Long, tellMaster: Boolean): Broadcast[T]
   def stop(): Unit
 }

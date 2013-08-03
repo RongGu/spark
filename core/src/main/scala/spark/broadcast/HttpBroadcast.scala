@@ -13,7 +13,7 @@ import spark._
 import spark.storage.StorageLevel
 import util.{MetadataCleaner, TimeStampedHashSet}
 
-private[spark] class HttpBroadcast[T](@transient var value_ : T, isLocal: Boolean, id: Long)
+private[spark] class HttpBroadcast[T](@transient var value_ : T, isLocal: Boolean, id: Long, tellMaster: Boolean = true)
 extends Broadcast[T](id) with Logging with Serializable {
   
   def value = value_
@@ -21,24 +21,32 @@ extends Broadcast[T](id) with Logging with Serializable {
   def blockId: String = "broadcast_" + id
 
   HttpBroadcast.synchronized {
-    //Let BlockManagerMaster know that we have the broadcast block for its latter notification us to remove.
-    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, true)
+    //If tellMaster is true, Let BlockManagerMaster know that we have the broadcast 
+    //block for its latter notification us to remove.
+    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster)
   }
 
   if (!isLocal) { 
     HttpBroadcast.write(id, value_)
   }
   
-  override def rm(toClearSource: Boolean = false) {
+  override def remove(toReleaseSource: Boolean = false) {
     logInfo("Remove broadcast variable " + blockId)
-    SparkEnv.get.blockManager.master.removeBlock(blockId)
-    SparkEnv.get.blockManager.removeBlock(blockId, false)
-    if(toClearSource){
-      val path: String = HttpBroadcast.broadcastDir + "/" + "broadcast-" + id
-      HttpBroadcast.files.internalMap.remove(path)
-      new File(path).delete()
-      logInfo("Deleted source broadcast file '" + path + "'")
+    if (tellMaster) {
+      logInfo("remove broadcast variable block" + blockId + " on slaves")
+      SparkEnv.get.blockManager.master.removeBlock(blockId)
     }
+    SparkEnv.get.blockManager.removeBlock(blockId, false)
+    if (toReleaseSource) {
+      releaseSource()
+    }
+  }
+  
+  def releaseSource(){
+    val path: String = HttpBroadcast.broadcastDir + "/" + "broadcast-" + id
+    HttpBroadcast.files.internalMap.remove(path)
+    new File(path).delete()
+    logInfo("Deleted source broadcast file '" + path + "'")
   }
 
   // Called by JVM when deserializing an object
@@ -51,8 +59,9 @@ extends Broadcast[T](id) with Logging with Serializable {
           logInfo("Started reading broadcast variable " + id)
           val start = System.nanoTime
           value_ = HttpBroadcast.read[T](id)
-          //Let BlockManagerMaster know that we have the broadcast block for its latter notification us to remove. 
-          SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, true) 
+          //If tellMaster is true, Let BlockManagerMaster know that we have the broadcast 
+          //block for its latter notification us to remove.
+          SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster)
           val time = (System.nanoTime - start) / 1e9
           logInfo("Reading broadcast variable " + id + " took " + time + " s")
         }
@@ -64,8 +73,8 @@ extends Broadcast[T](id) with Logging with Serializable {
 private[spark] class HttpBroadcastFactory extends BroadcastFactory {
   def initialize(isDriver: Boolean) { HttpBroadcast.initialize(isDriver) }
 
-  def newBroadcast[T](value_ : T, isLocal: Boolean, id: Long) =
-    new HttpBroadcast[T](value_, isLocal, id)
+  def newBroadcast[T](value_ : T, isLocal: Boolean, id: Long, tellMaster: Boolean) =
+    new HttpBroadcast[T](value_, isLocal, id, tellMaster)
 
   def stop() { HttpBroadcast.stop() }
 }

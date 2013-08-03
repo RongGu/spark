@@ -483,7 +483,7 @@ class SparkContext(
    * Broadcast a read-only variable to the cluster, returning a [[spark.broadcast.Broadcast]] object for
    * reading it in distributed functions. The variable will be sent to each cluster only once.
    */
-  def broadcast[T](value: T) = env.broadcastManager.newBroadcast[T](value, isLocal)
+  def broadcast[T](value: T, tellMaster: Boolean = true) = env.broadcastManager.newBroadcast[T](value, isLocal, tellMaster)
 
   /**
    * Add a file to be downloaded with this Spark job on every node.

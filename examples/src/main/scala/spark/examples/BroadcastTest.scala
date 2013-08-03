@@ -22,11 +22,11 @@ object BroadcastTest {
     for (i <- 0 until 2) {
       println("Iteration " + i)
       println("===========")
-      val barr1 = sc.broadcast(arr1)
+      val barr1 = sc.broadcast(arr1, (i == 0))
       sc.parallelize(1 to 10, slices).foreach {
         i => println(barr1.value.size)
       }
-      barr1.rm(true)
+      barr1.remove(true)
     }
 
     System.exit(0)

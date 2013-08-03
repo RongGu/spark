@@ -10,7 +10,7 @@ import scala.math
 import spark._
 import spark.storage.StorageLevel
 
-private[spark] class TreeBroadcast[T](@transient var value_ : T, isLocal: Boolean, id: Long)
+private[spark] class TreeBroadcast[T](@transient var value_ : T, isLocal: Boolean, id: Long, tellMaster: Boolean)
 extends Broadcast[T](id) with Logging with Serializable {
 
   def value = value_
@@ -18,8 +18,9 @@ extends Broadcast[T](id) with Logging with Serializable {
   def blockId = "broadcast_" + id
 
   MultiTracker.synchronized {
-    //Let BlockManagerMaster know that we have the broadcast block for its latter notification us to remove.
-    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, true)
+    //If tellMaster is true, Let BlockManagerMaster know that we have the broadcast 
+    //block for its latter notification us to remove.
+    SparkEnv.get.blockManager.putSingle(blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster)
   }
 
   @transient var arrayOfBlocks: Array[BroadcastBlock] = null
@@ -48,15 +49,19 @@ extends Broadcast[T](id) with Logging with Serializable {
     sendBroadcast()
   }
   
-  override def rm(toClearSource: Boolean = false) {
+  override def remove(toReleaseSource: Boolean = false) {
     logInfo("Remove broadcast variable " + blockId)
-    SparkEnv.get.blockManager.master.removeBlock(blockId)
+    if (tellMaster) {
+      logInfo("remove broadcast variable block" + blockId + " on slaves")
+      SparkEnv.get.blockManager.master.removeBlock(blockId)
+    }
     SparkEnv.get.blockManager.removeBlock(blockId, false)
-    if(toClearSource)
-      clearBlockSource()
+    if (toReleaseSource) {
+      releaseSource()
+    }
   }
   
-  def clearBlockSource(){
+  def releaseSource(){
     arrayOfBlocks = null
     listOfSources = null
     serveMR = null
@@ -130,8 +135,10 @@ extends Broadcast[T](id) with Logging with Serializable {
           val receptionSucceeded = receiveBroadcast(id)
           if (receptionSucceeded) {
             value_ = MultiTracker.unBlockifyObject[T](arrayOfBlocks, totalBytes, totalBlocks)
+            //If tellMaster is true, Let BlockManagerMaster know that we have the broadcast 
+            //block for its latter notification us to remove.
             SparkEnv.get.blockManager.putSingle(
-              blockId, value_, StorageLevel.MEMORY_AND_DISK, false)
+              blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster)
           }  else {
             logError("Reading broadcast variable " + id + " failed")
           }
@@ -594,8 +601,8 @@ private[spark] class TreeBroadcastFactory
 extends BroadcastFactory {
   def initialize(isDriver: Boolean) { MultiTracker.initialize(isDriver) }
 
-  def newBroadcast[T](value_ : T, isLocal: Boolean, id: Long) =
-    new TreeBroadcast[T](value_, isLocal, id)
+  def newBroadcast[T](value_ : T, isLocal: Boolean, id: Long, tellMaster: Boolean) =
+    new TreeBroadcast[T](value_, isLocal, id, tellMaster)
 
   def stop() { MultiTracker.stop() }
 }
